@@ -1,0 +1,36 @@
+{
+  "name": "minha-extensao",
+  "displayName": "Minha Extensão",
+  "description": "Uma extensão simples para VS Code",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [{
+      "command": "minha-extensao.novaExtensao",
+      "title": "Nova Extensão"
+    }],
+    "keybindings": [{
+      "command": "minha-extensao.novaExtensao",
+      "key": "u",
+      "when": "editorTextFocus"
+    }]
+  },
+  "scripts": {
+    "lint": "eslint .",
+    "pretest": "npm run lint",
+    "test": "vscode-test"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.80.0",
+    "@types/node": "^16.0.0",
+    "eslint": "^8.47.0",
+    "typescript": "^5.1.6"
+  }
+}
