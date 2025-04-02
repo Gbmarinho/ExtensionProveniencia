@@ -51,14 +51,12 @@ function activate(context) {
         return;
     }
 
-    // Inicializa o hash do último commit
     exec('git rev-parse HEAD', { cwd: workspaceRoot }, (error, stdout) => {
         if (!error) {
             lastCommitHash = stdout.trim();
         }
     });
 
-    // Verifica novos commits a cada 2 segundos
     const interval = setInterval(async () => {
         try {
             const newHash = await checkForNewCommit(workspaceRoot, lastCommitHash);
@@ -66,16 +64,21 @@ function activate(context) {
                 lastCommitHash = newHash;
                 const commitMessage = await getLastCommitMessage(workspaceRoot);
                 const changedFiles = await getGitChangedFiles(workspaceRoot);
-                
-                // Criando a mensagem com os arquivos alterados
-                // Preparando a mensagem completa
-                let message = commitMessage + '\n\nArquivos alterados:';
+    
+                let message = commitMessage + '\n\nArquivos alterados:\n';
                 changedFiles.forEach(file => {
-                    message += '\n• ' + file;
+                    message += '• ' + file + '\n';
                 });
-
-                // Mostrando a notificação
-                vscode.window.showInformationMessage(message);
+    
+                vscode.window.showInformationMessage(
+                    'Novo commit detectado! Clique para ver detalhes.',
+                    'Ver Detalhes'
+                ).then(selection => {
+                    if (selection === 'Ver Detalhes') {
+                        const doc = vscode.workspace.openTextDocument({ content: message });
+                        vscode.window.showTextDocument(doc);
+                    }
+                });
             }
         } catch (error) {
             console.error('Erro ao verificar commits:', error);
