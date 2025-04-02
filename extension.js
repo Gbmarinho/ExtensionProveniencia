@@ -4,7 +4,7 @@ const path = require('path');
 
 function getGitChangedFiles(workspaceRoot) {
     return new Promise((resolve, reject) => {
-        exec('git diff --name-only HEAD HEAD~1', { cwd: workspaceRoot }, (error, stdout, stderr) => {
+        exec('git diff-tree --no-commit-id --name-only -r HEAD', { cwd: workspaceRoot }, (error, stdout, stderr) => {
             if (error) {
                 reject(error);
                 return;
@@ -67,11 +67,15 @@ function activate(context) {
                 const commitMessage = await getLastCommitMessage(workspaceRoot);
                 const changedFiles = await getGitChangedFiles(workspaceRoot);
                 
-                const filesMessage = changedFiles.length > 0 
-                    ? 'Arquivos alterados:\n' + changedFiles.map(file => `• ${file}`).join('\n')
-                    : 'Nenhum arquivo alterado';
+                // Criando a mensagem com os arquivos alterados
+                // Preparando a mensagem completa
+                let message = commitMessage + '\n\nArquivos alterados:';
+                changedFiles.forEach(file => {
+                    message += '\n• ' + file;
+                });
 
-                vscode.window.showInformationMessage(commitMessage, { detail: filesMessage });
+                // Mostrando a notificação
+                vscode.window.showInformationMessage(message);
             }
         } catch (error) {
             console.error('Erro ao verificar commits:', error);
