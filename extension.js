@@ -1,6 +1,7 @@
 const vscode = require('vscode');
 const { exec } = require('child_process');
 const path = require('path');
+const fetch = require('node-fetch');
 
 function getGitChangedFiles(workspaceRoot) {
     return new Promise((resolve, reject) => {
@@ -66,9 +67,19 @@ function activate(context) {
                 const changedFiles = await getGitChangedFiles(workspaceRoot);
     
                 let message = commitMessage + '\n\nArquivos alterados:\n';
-                changedFiles.forEach(file => {
+                for (const file of changedFiles) {
                     message += '• ' + file + '\n';
-                });
+                    try {
+                        const fileContent = await vscode.workspace.fs.readFile(vscode.Uri.file(path.join(workspaceRoot, file)));
+                        const content = Buffer.from(fileContent).toString('utf8');
+                        const suggestions = await getCodeSuggestions(content);
+                        message += '  Sugestões de melhoria:\n';
+                        message += '  ' + suggestions + '\n\n';
+                    } catch (error) {
+                        console.error(`Erro ao analisar arquivo ${file}:`, error);
+                        message += '  Erro ao gerar sugestões para este arquivo\n\n';
+                    }
+                }
     
                 vscode.window.showInformationMessage(
                     'Novo commit detectado! Clique para ver detalhes.',
@@ -88,6 +99,40 @@ function activate(context) {
     context.subscriptions.push({
         dispose: () => clearInterval(interval)
     });
+}
+
+const { GoogleGenerativeAI } = require('@google/generative-ai');
+
+async function getCodeSuggestions(code) {
+    try {
+        // Inicializa o modelo Gemini (use sua chave API aqui)
+        const genAI = new GoogleGenerativeAI('AIzaSyB9-V4uJVQLPtdOMarYOCtRwWlfxzKsUTk');
+        const model = genAI.getGenerativeModel({ model: 'gemini-pro' });
+
+        // Prepara o prompt para análise do código
+        const prompt = `Analise este código e forneça sugestões concisas de melhorias (máximo 3 sugestões):
+
+${code}
+
+Foque em:
+1. Boas práticas
+2. Padrões de projeto
+3. Otimizações possíveis
+4. Segurança (se aplicável)
+
+Formate cada sugestão em uma nova linha começando com '-'`;
+
+        // Gera a resposta
+        const result = await model.generateContent(prompt);
+        const response = await result.response;
+        const suggestions = response.text();
+
+        return suggestions || 'Nenhuma sugestão disponível no momento.';
+
+    } catch (error) {
+        console.error('Erro ao obter sugestões:', error);
+        return `Erro ao gerar sugestões. Por favor, tente novamente mais tarde. ${error}`;
+    }
 }
 
 function deactivate() {}
