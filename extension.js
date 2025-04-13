@@ -28,6 +28,105 @@ function getLastCommitMessage(workspaceRoot) {
     });
 }
 
+async function getGitInfo(workspaceRoot) {
+    try {
+        const [commitMsg, branch, email] = await Promise.all([
+            new Promise((resolve, reject) => {
+                exec('git log -1 --pretty=%B', { cwd: workspaceRoot }, (error, stdout) => {
+                    if (error) reject(error);
+                    else resolve(stdout.trim());
+                });
+            }),
+            new Promise((resolve, reject) => {
+                exec('git rev-parse --abbrev-ref HEAD', { cwd: workspaceRoot }, (error, stdout) => {
+                    if (error) reject(error);
+                    else resolve(stdout.trim());
+                });
+            }),
+            new Promise((resolve, reject) => {
+                exec('git log -1 --pretty=%ae', { cwd: workspaceRoot }, (error, stdout) => {
+                    if (error) reject(error);
+                    else resolve(stdout.trim());
+                });
+            })
+        ]);
+
+        return { commitMsg, branch, email };
+    } catch (error) {
+        console.error('Erro ao obter informações do git:', error);
+        throw error;
+    }
+}
+
+async function generateCommitSummary(commitInfo, changedFiles) {
+    try {
+        const filesContent = changedFiles.map(file => `- ${file}`).join('\n');
+        const prompt = `Analise este commit e gere um resumo detalhado do que foi feito:\n\nMensagem do commit: ${commitInfo.commitMsg}\n\nArquivos alterados:\n${filesContent}`;
+
+        const response = await fetch('https://api-inference.huggingface.co/models/Salesforce/codegen-350M-mono', {
+            method: 'POST',
+            headers: {
+                'Authorization': 'Bearer',
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                inputs: prompt,
+                parameters: {
+                    max_length: 500,
+                    temperature: 0.7
+                }
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error(`Erro na API: ${response.status}`);
+        }
+
+        const data = await response.json();
+        return Array.isArray(data) && data.length > 0 ? 
+            data[0].generated_text : 
+            'Não foi possível gerar um resumo detalhado para este commit.';
+    } catch (error) {
+        console.error('Erro ao gerar resumo do commit:', error);
+        return `Não foi possível gerar um resumo detalhado para este commit. Erro: ${error.message}`;
+    }
+}
+
+async function updateUpgradeLog(workspaceRoot, commitInfo, changedFiles) {
+    try {
+        const upgradeLogPath = path.join(workspaceRoot, 'Upgrade-log.md');
+        let existingContent = '';
+
+        try {
+            const fileUri = vscode.Uri.file(upgradeLogPath);
+            const fileContent = await vscode.workspace.fs.readFile(fileUri);
+            existingContent = Buffer.from(fileContent).toString('utf8');
+        } catch (error) {
+            // Arquivo não existe ainda, começaremos um novo
+            existingContent = '# Histórico de Atualizações\n\n';
+        }
+
+        const summary = await generateCommitSummary(commitInfo, changedFiles);
+
+        const newEntry = `## Commit "${commitInfo.commitMsg}"\n` +
+            `**Branch:** ${commitInfo.branch}\n` +
+            `**Responsável:** ${commitInfo.email}\n\n` +
+            `${summary}\n\n---\n\n`;
+
+        const newContent = existingContent.includes('# Histórico de Atualizações') ?
+            existingContent.replace('# Histórico de Atualizações\n\n', `# Histórico de Atualizações\n\n${newEntry}`) :
+            `# Histórico de Atualizações\n\n${newEntry}${existingContent}`;
+
+        const fileUri = vscode.Uri.file(upgradeLogPath);
+        await vscode.workspace.fs.writeFile(fileUri, Buffer.from(newContent));
+
+        return upgradeLogPath;
+    } catch (error) {
+        console.error('Erro ao atualizar Upgrade-log:', error);
+        throw error;
+    }
+}
+
 async function checkForNewCommit(workspaceRoot, lastCommitHash) {
     return new Promise((resolve, reject) => {
         exec('git rev-parse HEAD', { cwd: workspaceRoot }, (error, stdout, stderr) => {
@@ -141,10 +240,18 @@ function activate(context) {
             const newHash = await checkForNewCommit(workspaceRoot, lastCommitHash);
             if (newHash) {
                 lastCommitHash = newHash;
-                const commitMessage = await getLastCommitMessage(workspaceRoot);
+                const commitInfo = await getGitInfo(workspaceRoot);
                 const changedFiles = await getGitChangedFiles(workspaceRoot);
+                
+                // Atualiza o Upgrade-log.md
+                try {
+                    const upgradeLogPath = await updateUpgradeLog(workspaceRoot, commitInfo, changedFiles);
+                    console.log('Upgrade-log atualizado com sucesso:', upgradeLogPath);
+                } catch (error) {
+                    console.error('Erro ao atualizar Upgrade-log:', error);
+                }
     
-                let message = commitMessage + '\n\nArquivos alterados:\n';
+                let message = commitInfo.commitMsg + '\n\nArquivos alterados:\n';
                 for (const file of changedFiles) {
                     message += '• ' + file + '\n';
                     try {
