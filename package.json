@@ -18,8 +18,20 @@
       {
         "command": "minha-extensao.novaExtensao",
         "title": "Nova Extensão"
+      },
+      {
+        "command": "minha-extensao.criarDocumentacao",
+        "title": "Criar Documentação"
       }
     ],
+    "menus": {
+      "explorer/context": [
+        {
+          "command": "minha-extensao.criarDocumentacao",
+          "group": "navigation"
+        }
+      ]
+    },
     "keybindings": [
       {
         "command": "minha-extensao.novaExtensao",

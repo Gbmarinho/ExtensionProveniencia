@@ -41,8 +41,86 @@ async function checkForNewCommit(workspaceRoot, lastCommitHash) {
     });
 }
 
+async function generateDocumentation(fileUri) {
+    try {
+        // Lê o conteúdo do arquivo
+        const fileContent = await vscode.workspace.fs.readFile(fileUri);
+        const content = Buffer.from(fileContent).toString('utf8');
+
+        // Gera o nome do arquivo de documentação
+        const filePath = fileUri.fsPath;
+        const fileExtension = path.extname(filePath);
+        const baseFileName = path.basename(filePath, fileExtension);
+        const docFileName = `${baseFileName}-Doc.md`;
+        const docFilePath = path.join(path.dirname(filePath), docFileName);
+
+        let documentation = `# Documentação do arquivo "${path.basename(filePath)}"
+
+`;
+
+        try {
+            // Gera a documentação usando a API do Hugging Face
+            const response = await fetch('https://api-inference.huggingface.co/models/Salesforce/codegen-350M-mono', {
+                method: 'POST',
+                headers: {
+                    'Authorization': 'Bearer',
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    inputs: `Crie uma documentação detalhada em markdown para este código, explicando todas as funções e o propósito do arquivo:\n${content}`,
+                    parameters: {
+                        max_length: 1000,
+                        temperature: 0.7
+                    }
+                })
+            });
+
+            if (!response.ok) {
+                throw new Error(`Erro na API: ${response.status}`);
+            }
+
+            const data = await response.json();
+            if (Array.isArray(data) && data.length > 0) {
+                documentation += data[0].generated_text;
+            } else {
+                documentation += '**Não foi possível gerar a documentação automática.**';
+            }
+        } catch (apiError) {
+            documentation += `**Erro ao gerar documentação automática:**
+
+\`\`\`
+${apiError.message}
+\`\`\`
+`;
+        }
+
+        // Cria o arquivo de documentação
+        const docUri = vscode.Uri.file(docFilePath);
+        await vscode.workspace.fs.writeFile(docUri, Buffer.from(documentation));
+
+        // Abre o arquivo de documentação
+        const doc = await vscode.workspace.openTextDocument(docUri);
+        await vscode.window.showTextDocument(doc);
+
+        vscode.window.showInformationMessage(`Arquivo de documentação criado: ${docFileName}`);
+    } catch (error) {
+        vscode.window.showErrorMessage(`Erro ao criar arquivo de documentação: ${error.message}`);
+        console.error('Erro completo:', error);
+    }
+}
+
 function activate(context) {
     console.log('Extensão de monitoramento de commits está ativa!');
+
+    // Registra o comando de criar documentação
+    let disposable = vscode.commands.registerCommand('minha-extensao.criarDocumentacao', (fileUri) => {
+        if (!fileUri) {
+            vscode.window.showErrorMessage('Por favor, clique com o botão direito em um arquivo para gerar a documentação.');
+            return;
+        }
+        generateDocumentation(fileUri);
+    });
+    context.subscriptions.push(disposable);
 
     let lastCommitHash = '';
     const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
