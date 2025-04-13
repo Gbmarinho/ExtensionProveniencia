@@ -101,33 +101,30 @@ function activate(context) {
     });
 }
 
-const { GoogleGenerativeAI } = require('@google/generative-ai');
-
 async function getCodeSuggestions(code) {
     try {
-        // Inicializa o modelo Gemini (use sua chave API aqui)
-        const genAI = new GoogleGenerativeAI('AIzaSyB9-V4uJVQLPtdOMarYOCtRwWlfxzKsUTk');
-        const model = genAI.getGenerativeModel({ model: 'gemini-pro' });
+        const response = await fetch('https://api-inference.huggingface.co/models/Salesforce/codegen-350M-mono', {
+            method: 'POST',
+            headers: {
+                'Authorization': 'Bearer',
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                inputs: `Analise este código e forneça sugestões de melhoria:\n${code}`,
+                parameters: {
+                    max_length: 150,
+                    temperature: 0.7
+                }
+            })
+        });
 
-        // Prepara o prompt para análise do código
-        const prompt = `Analise este código e forneça sugestões concisas de melhorias (máximo 3 sugestões):
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`HTTP error! status: ${response.status}, details: ${errorText}`);
+        }
 
-${code}
-
-Foque em:
-1. Boas práticas
-2. Padrões de projeto
-3. Otimizações possíveis
-4. Segurança (se aplicável)
-
-Formate cada sugestão em uma nova linha começando com '-'`;
-
-        // Gera a resposta
-        const result = await model.generateContent(prompt);
-        const response = await result.response;
-        const suggestions = response.text();
-
-        return suggestions || 'Nenhuma sugestão disponível no momento.';
+        const data = await response.json();
+        return Array.isArray(data) && data.length > 0 ? data[0].generated_text : 'Nenhuma sugestão disponível no momento.';
 
     } catch (error) {
         console.error('Erro ao obter sugestões:', error);

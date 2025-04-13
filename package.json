@@ -9,18 +9,24 @@
   "categories": [
     "Other"
   ],
-  "activationEvents": ["workspaceContains:.git"],
+  "activationEvents": [
+    "workspaceContains:.git"
+  ],
   "main": "./extension.js",
   "contributes": {
-    "commands": [{
-      "command": "minha-extensao.novaExtensao",
-      "title": "Nova Extensão"
-    }],
-    "keybindings": [{
-      "command": "minha-extensao.novaExtensao",
-      "key": "u",
-      "when": "editorTextFocus"
-    }]
+    "commands": [
+      {
+        "command": "minha-extensao.novaExtensao",
+        "title": "Nova Extensão"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "minha-extensao.novaExtensao",
+        "key": "u",
+        "when": "editorTextFocus"
+      }
+    ]
   },
   "scripts": {
     "lint": "eslint .",
@@ -28,12 +34,13 @@
     "test": "vscode-test"
   },
   "dependencies": {
-    "node-fetch": "^2.6.1",
-    "@google/generative-ai": "^0.2.0"
+    "@google/generative-ai": "^0.2.0",
+    "dotenv": "^16.4.7",
+    "node-fetch": "^2.6.1"
   },
   "devDependencies": {
-    "@types/vscode": "^1.80.0",
     "@types/node": "^16.0.0",
+    "@types/vscode": "^1.80.0",
     "eslint": "^8.47.0",
     "typescript": "^5.1.6"
   }
