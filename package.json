@@ -22,12 +22,43 @@
       {
         "command": "minha-extensao.criarDocumentacao",
         "title": "Criar Documentação"
+      },
+      {
+        "command": "minha-extensao.mostrarHistoricoArquivo",
+        "title": "Mostrar Histórico do Arquivo"
       }
     ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "historicoArquivos",
+          "title": "Histórico de Arquivos",
+          "icon": "$(history)"
+        }
+      ]
+    },
+    "views": {
+      "historicoArquivos": [
+        {
+          "id": "historicoArquivoView",
+          "name": "Timeline do Arquivo"
+        }
+      ]
+    },
     "menus": {
       "explorer/context": [
         {
           "command": "minha-extensao.criarDocumentacao",
+          "group": "navigation"
+        },
+        {
+          "command": "minha-extensao.mostrarHistoricoArquivo",
+          "group": "navigation"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "minha-extensao.mostrarHistoricoArquivo",
           "group": "navigation"
         }
       ]

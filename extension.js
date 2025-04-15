@@ -2,6 +2,88 @@ const vscode = require('vscode');
 const { exec } = require('child_process');
 const path = require('path');
 const fetch = require('node-fetch');
+const fs = require('fs').promises;
+
+class FileHistoryProvider {
+    constructor() {
+        this._onDidChangeTreeData = new vscode.EventEmitter();
+        this.onDidChangeTreeData = this._onDidChangeTreeData.event;
+        this.currentFile = null;
+        this.commits = [];
+    }
+
+    async setCurrentFile(filePath) {
+        this.currentFile = filePath;
+        await this.refreshCommits();
+        this._onDidChangeTreeData.fire();
+    }
+
+    async refreshCommits() {
+        if (!this.currentFile) {
+            this.commits = [];
+            return;
+        }
+
+        const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        if (!workspaceRoot) {
+            throw new Error('Nenhum workspace aberto');
+        }
+
+        const relativePath = path.relative(workspaceRoot, this.currentFile);
+
+        try {
+            const commits = await new Promise((resolve, reject) => {
+                exec(
+                    `git log --pretty=format:"%H|%s|%ae|%ai" -- ${relativePath}`,
+                    { cwd: workspaceRoot },
+                    (error, stdout) => {
+                        if (error) {
+                            reject(error);
+                            return;
+                        }
+                        const lines = stdout.trim().split('\n');
+                        const commits = lines.map(line => {
+                            const [hash, subject, author, date] = line.split('|');
+                            return { hash, subject, author, date };
+                        });
+                        resolve(commits);
+                    }
+                );
+            });
+
+            this.commits = commits;
+        } catch (error) {
+            console.error('Erro ao obter histórico:', error);
+            this.commits = [];
+            throw error;
+        }
+    }
+
+    getTreeItem(element) {
+        const treeItem = new vscode.TreeItem(
+            `${element.subject} (${new Date(element.date).toLocaleDateString()})`,
+            vscode.TreeItemCollapsibleState.None
+        );
+        
+        treeItem.description = `por ${element.author}`;
+        treeItem.tooltip = `Hash: ${element.hash}\nAutor: ${element.author}\nData: ${element.date}`;
+        treeItem.command = {
+            command: 'minha-extensao.abrirDiff',
+            title: 'Abrir Diff',
+            arguments: [this.currentFile, element.hash]
+        };
+        treeItem.iconPath = new vscode.ThemeIcon('git-commit');
+        
+        return treeItem;
+    }
+
+    getChildren(element) {
+        if (element) {
+            return [];
+        }
+        return this.commits;
+    }
+}
 
 function getGitChangedFiles(workspaceRoot) {
     return new Promise((resolve, reject) => {
@@ -127,6 +209,86 @@ async function updateUpgradeLog(workspaceRoot, commitInfo, changedFiles) {
     }
 }
 
+async function findTodos(workspaceRoot) {
+    try {
+        // Busca por arquivos no projeto, excluindo node_modules e .git
+        const findFiles = new Promise((resolve, reject) => {
+            exec('find . -type f -not -path "*/\.*" -not -path "*/node_modules/*"', 
+                { cwd: workspaceRoot }, 
+                (error, stdout) => {
+                    if (error) reject(error);
+                    else resolve(stdout.trim().split('\n'));
+                }
+            );
+        });
+
+        const files = await findFiles;
+        const todos = [];
+
+        for (const file of files) {
+            if (file) {
+                const filePath = path.join(workspaceRoot, file.slice(2)); // remove './' do início
+                try {
+                    const content = await fs.readFile(filePath, 'utf-8');
+                    const lines = content.split('\n');
+
+                    lines.forEach((line, index) => {
+                        // Busca por diferentes formatos de TODO
+                        const todoPatterns = [
+                            /\/\/\s*TODO:?\s*(.+)/, // Para // TODO
+                            /\/\*\s*TODO:?\s*(.+)\*\//, // Para /* TODO */
+                            /#\s*TODO:?\s*(.+)/, // Para # TODO
+                            /<!--\s*TODO:?\s*(.+)-->/ // Para <!-- TODO -->
+                        ];
+
+                        for (const pattern of todoPatterns) {
+                            const match = line.match(pattern);
+                            if (match) {
+                                todos.push({
+                                    file: file.slice(2),
+                                    line: index + 1,
+                                    text: match[1].trim()
+                                });
+                                break;
+                            }
+                        }
+                    });
+                } catch (error) {
+                    console.error(`Erro ao ler arquivo ${file}:`, error);
+                }
+            }
+        }
+
+        return todos;
+    } catch (error) {
+        console.error('Erro ao buscar TODOs:', error);
+        throw error;
+    }
+}
+
+async function updateTodosFile(workspaceRoot, todos) {
+    try {
+        const todosPath = path.join(workspaceRoot, 'TODOs.md');
+        let content = '# Lista de TODOs\n\n';
+        content += 'Última atualização: ' + new Date().toLocaleString() + '\n\n';
+
+        if (todos.length === 0) {
+            content += 'Nenhum TODO encontrado no projeto.\n';
+        } else {
+            for (const todo of todos) {
+                content += `## ${todo.file}:${todo.line}\n`;
+                content += `${todo.text}\n\n`;
+            }
+        }
+
+        await fs.writeFile(todosPath, content, 'utf-8');
+        console.log('Arquivo TODOs.md atualizado com sucesso');
+    } catch (error) {
+        console.error('Erro ao atualizar arquivo TODOs.md:', error);
+        throw error;
+    }
+}
+
 async function checkForNewCommit(workspaceRoot, lastCommitHash) {
     return new Promise((resolve, reject) => {
         exec('git rev-parse HEAD', { cwd: workspaceRoot }, (error, stdout, stderr) => {
@@ -211,6 +373,92 @@ ${apiError.message}
 function activate(context) {
     console.log('Extensão de monitoramento de commits está ativa!');
 
+    // Inicializa o provedor de histórico de arquivos
+    const fileHistoryProvider = new FileHistoryProvider();
+    const treeView = vscode.window.createTreeView('historicoArquivoView', {
+        treeDataProvider: fileHistoryProvider
+    });
+
+    // Registra o comando para mostrar histórico
+    let disposableShowHistory = vscode.commands.registerCommand(
+        'minha-extensao.mostrarHistoricoArquivo',
+        (fileUri) => {
+            let filePath;
+            if (fileUri) {
+                filePath = fileUri.fsPath;
+            } else {
+                const activeEditor = vscode.window.activeTextEditor;
+                if (!activeEditor) {
+                    vscode.window.showErrorMessage('Nenhum arquivo selecionado');
+                    return;
+                }
+                filePath = activeEditor.document.uri.fsPath;
+            }
+
+            fileHistoryProvider.setCurrentFile(filePath);
+            treeView.reveal(treeView.selection[0], { expand: true, focus: true });
+        }
+    );
+
+    // Registra o comando para abrir diff
+    let disposableOpenDiff = vscode.commands.registerCommand(
+        'minha-extensao.abrirDiff',
+        async (filePath, commitHash) => {
+            try {
+                const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+                if (!workspaceRoot) {
+                    throw new Error('Nenhum workspace aberto');
+                }
+
+                // Cria um arquivo temporário com o conteúdo do commit
+                const relativePath = path.relative(workspaceRoot, filePath);
+                const tempFile = path.join(workspaceRoot, `.tmp-${path.basename(filePath)}-${commitHash}`);
+
+                // Obtém o conteúdo do arquivo no commit
+                await new Promise((resolve, reject) => {
+                    exec(
+                        `git show ${commitHash}:${relativePath}`,
+                        { cwd: workspaceRoot },
+                        async (error, stdout) => {
+                            if (error) {
+                                reject(error);
+                                return;
+                            }
+
+                            try {
+                                await fs.writeFile(tempFile, stdout);
+                                resolve();
+                            } catch (writeError) {
+                                reject(writeError);
+                            }
+                        }
+                    );
+                });
+
+                // Abre o diff
+                const uri1 = vscode.Uri.file(tempFile);
+                const uri2 = vscode.Uri.file(filePath);
+                await vscode.commands.executeCommand('vscode.diff', uri1, uri2, 
+                    `${path.basename(filePath)} (${commitHash} vs. Atual)`);
+
+                // Remove o arquivo temporário após um breve delay
+                setTimeout(async () => {
+                    try {
+                        await fs.unlink(tempFile);
+                    } catch (error) {
+                        console.error('Erro ao remover arquivo temporário:', error);
+                    }
+                }, 1000);
+
+            } catch (error) {
+                vscode.window.showErrorMessage(`Erro ao abrir diff: ${error.message}`);
+                console.error('Erro completo:', error);
+            }
+        }
+    );
+
+    context.subscriptions.push(disposableShowHistory, disposableOpenDiff, treeView);
+
     // Registra o comando de criar documentação
     let disposable = vscode.commands.registerCommand('minha-extensao.criarDocumentacao', (fileUri) => {
         if (!fileUri) {
@@ -242,6 +490,14 @@ function activate(context) {
                 lastCommitHash = newHash;
                 const commitInfo = await getGitInfo(workspaceRoot);
                 const changedFiles = await getGitChangedFiles(workspaceRoot);
+
+                // Atualiza o arquivo de TODOs
+                try {
+                    const todos = await findTodos(workspaceRoot);
+                    await updateTodosFile(workspaceRoot, todos);
+                } catch (error) {
+                    console.error('Erro ao atualizar TODOs:', error);
+                }
                 
                 // Atualiza o Upgrade-log.md
                 try {
